@@ -13,8 +13,8 @@ github.com/containerd/cgroups v0.0.0-20181208203134-65ce98b3dfeb h1:NbTtlERiUsSc
 github.com/containerd/cgroups v0.0.0-20181208203134-65ce98b3dfeb/go.mod h1:X9rLEHIqSf/wfK8NsPqxJmeZgW4pcfzdXITDrUSJ6uI=
 github.com/containerd/continuity v0.0.0-20180612233548-246e49050efd h1:AqPnRJG7BcXlRtISATdp/XsD4cwZK6MdeMxFQ2hGFdw=
 github.com/containerd/continuity v0.0.0-20180612233548-246e49050efd/go.mod h1:GL3xCUCBDV3CZiTSEKksMWbLE66hEyuu9qyDOOqM47Y=
-github.com/containernetworking/cni v0.6.0 h1:FXICGBZNMtdHlW65trpoHviHctQD3seWhRRcqp2hMOU=
-github.com/containernetworking/cni v0.6.0/go.mod h1:LGwApLUm2FpoOfxTDEeq8T9ipbpZ61X79hmU3w8FmsY=
+github.com/containernetworking/cni v0.8.1 h1:7zpDnQ3T3s4ucOuJ/ZCLrYBxzkg0AELFfII3Epo9TmI=
+github.com/containernetworking/cni v0.8.1/go.mod h1:LGwApLUm2FpoOfxTDEeq8T9ipbpZ61X79hmU3w8FmsY=
 github.com/containernetworking/plugins v0.0.0-20180606151004-2b8b1ac0af45 h1:9C4IVjZv9gi2adMcyatH/1QfYKwHRoorwxI/Q5knf/4=
 github.com/containernetworking/plugins v0.0.0-20180606151004-2b8b1ac0af45/go.mod h1:dagHaAhNjXjT9QYOklkKJDGaQPTg4pf//FrUcJeb7FU=
 github.com/containers/image v0.0.0-20180612162315-2e4f799f5eba h1:gSB68H7q2WphSW/Qv2b8/vquMvB6Hx0I7KkYO6pulsQ=
@@ -209,7 +209,6 @@ golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f/go.mod h1:RxMgew5VJxzue5/jJ
 golang.org/x/sync v0.0.0-20190227155943-e225da77a7e6 h1:bjcUS9ztw9kFmmIxJInhon/0Is3p+EHBKNgquIzo1OI=
 golang.org/x/sync v0.0.0-20190227155943-e225da77a7e6/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
 golang.org/x/sys v0.0.0-20180909124046-d0be0721c37e/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
-golang.org/x/sys v0.0.0-20181205085412-a5c9d58dba9a h1:1n5lsVfiQW3yfsRGu98756EH1YthsFqr/5mxHduZW2A=
 golang.org/x/sys v0.0.0-20181205085412-a5c9d58dba9a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223 h1:DH4skfRX4EBpamg7iV4ZlCpblAHI6s6TDM39bFZumv8=
 golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=

@@ -9,7 +9,7 @@ require (
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/containerd/cgroups v0.0.0-20181208203134-65ce98b3dfeb
 	github.com/containerd/continuity v0.0.0-20180612233548-246e49050efd // indirect
-	github.com/containernetworking/cni v0.6.0
+	github.com/containernetworking/cni v0.8.1
 	github.com/containernetworking/plugins v0.0.0-20180606151004-2b8b1ac0af45
 	github.com/containers/image v0.0.0-20180612162315-2e4f799f5eba
 	github.com/containers/storage v0.0.0-20180604200230-88d80428f9b1 // indirect
