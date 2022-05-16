@@ -1,4 +1,4 @@
-// Copyright (c) 2018, Sylabs Inc. All rights reserved.
+// Copyright (c) 2018-2020, Sylabs Inc. All rights reserved.
 // Copyright (c) 2017, SingularityWare, LLC. All rights reserved.
 // Copyright (c) 2017, Yannick Cote <yhcote@gmail.com> All rights reserved.
 // This software is licensed under a 3-clause BSD license. Please consult the
@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-// Find next offset aligned to block size
+// Find next offset aligned to block size.
 func nextAligned(offset int64, align int) int64 {
 	align64 := uint64(align)
 	offset64 := uint64(offset)
@@ -32,7 +32,7 @@ func nextAligned(offset int64, align int) int64 {
 	return int64(offset64)
 }
 
-// Set file pointer offset to next aligned block
+// Set file pointer offset to next aligned block.
 func setFileOffNA(fimg *FileImage, alignment int) (int64, error) {
 	offset, err := fimg.Fp.Seek(0, 1) // get current position
 	if err != nil {
@@ -46,7 +46,7 @@ func setFileOffNA(fimg *FileImage, alignment int) (int64, error) {
 	return offset, nil
 }
 
-// Get current user and returns both uid and gid
+// Get current user and returns both uid and gid.
 func getUserIDs() (int64, int64, error) {
 	u, err := user.Current()
 	if err != nil {
@@ -66,7 +66,7 @@ func getUserIDs() (int64, int64, error) {
 	return int64(uid), int64(gid), nil
 }
 
-// Fill all of the fields of a Descriptor
+// Fill all of the fields of a Descriptor.
 func fillDescriptor(fimg *FileImage, index int, input DescriptorInput) (err error) {
 	descr := &fimg.DescrArr[index]
 
@@ -121,7 +121,7 @@ func fillDescriptor(fimg *FileImage, index int, input DescriptorInput) (err erro
 	return
 }
 
-// Write new data object to the SIF file
+// Write new data object to the SIF file.
 func writeDataObject(fimg *FileImage, index int, input DescriptorInput) error {
 	// if we have bytes in input.data use that instead of an input file
 	if input.Data != nil {
@@ -129,11 +129,14 @@ func writeDataObject(fimg *FileImage, index int, input DescriptorInput) error {
 			return fmt.Errorf("copying data object data to SIF file: %s", err)
 		}
 	} else {
-		if n, err := io.Copy(fimg.Fp, input.Fp); err != nil {
+		n, err := io.Copy(fimg.Fp, input.Fp)
+		if err != nil {
 			return fmt.Errorf("copying data object file to SIF file: %s", err)
-		} else if n != input.Size && input.Size != 0 {
+		}
+		if n != input.Size && input.Size != 0 {
 			return fmt.Errorf("short write while copying to SIF file")
-		} else if input.Size == 0 {
+		}
+		if input.Size == 0 {
 			// coming in from os.Stdin (pipe)
 			descr := &fimg.DescrArr[index]
 			descr.Filelen = n
@@ -144,7 +147,7 @@ func writeDataObject(fimg *FileImage, index int, input DescriptorInput) error {
 	return nil
 }
 
-// Find a free descriptor and create a memory representation for addition to the SIF file
+// Find a free descriptor and create a memory representation for addition to the SIF file.
 func createDescriptor(fimg *FileImage, input DescriptorInput) (err error) {
 	var (
 		idx int
@@ -182,7 +185,7 @@ func createDescriptor(fimg *FileImage, input DescriptorInput) (err error) {
 	return
 }
 
-// Release and write the data object descriptor to backing storage (SIF container file)
+// Release and write the data object descriptor to backing storage (SIF container file).
 func writeDescriptors(fimg *FileImage) error {
 	// first, move to descriptor start offset
 	if _, err := fimg.Fp.Seek(DescrStartOffset, 0); err != nil {
@@ -199,7 +202,7 @@ func writeDescriptors(fimg *FileImage) error {
 	return nil
 }
 
-// Write the global header to file
+// Write the global header to file.
 func writeHeader(fimg *FileImage) error {
 	// first, move to descriptor start offset
 	if _, err := fimg.Fp.Seek(0, 0); err != nil {
@@ -345,22 +348,21 @@ func (fimg *FileImage) AddObject(input DescriptorInput) error {
 	return nil
 }
 
-// descrIsLast return true if passed descriptor's object is the last in a SIF file
+// descrIsLast return true if passed descriptor's object is the last in a SIF file.
 func objectIsLast(fimg *FileImage, descr *Descriptor) bool {
 	return fimg.Filesize == descr.Fileoff+descr.Filelen
 }
 
-// compactAtDescr joins data objects leading and following "descr" by compacting a SIF file
+// compactAtDescr joins data objects leading and following "descr" by compacting a SIF file.
 func compactAtDescr(fimg *FileImage, descr *Descriptor) error {
 	var prev Descriptor
 
 	for _, v := range fimg.DescrArr {
 		if !v.Used || v.ID == descr.ID {
 			continue
-		} else {
-			if v.Fileoff > prev.Fileoff {
-				prev = v
-			}
+		}
+		if v.Fileoff > prev.Fileoff {
+			prev = v
 		}
 	}
 	// make sure it's not the only used descriptor first
@@ -378,7 +380,7 @@ func compactAtDescr(fimg *FileImage, descr *Descriptor) error {
 }
 
 // DeleteObject removes data from a SIF file referred to by id. The descriptor for the
-// data object is free'd and can be reused later. There's currenly 2 clean mode specified
+// data object is free'd and can be reused later. There's currently 2 clean mode specified
 // by flags: DelZero, to zero out the data region for security and DelCompact to
 // remove and shink the file compacting the unused area.
 func (fimg *FileImage) DeleteObject(id uint32, flags int) error {
@@ -429,7 +431,7 @@ func (fimg *FileImage) DeleteObject(id uint32, flags int) error {
 	return nil
 }
 
-// SetPartExtra serializes the partition and fs type info into a binary buffer
+// SetPartExtra serializes the partition and fs type info into a binary buffer.
 func (di *DescriptorInput) SetPartExtra(fs Fstype, part Parttype, arch string) error {
 	extra := Partition{
 		Fstype:   fs,
@@ -438,7 +440,7 @@ func (di *DescriptorInput) SetPartExtra(fs Fstype, part Parttype, arch string) e
 	if arch == HdrArchUnknown {
 		return fmt.Errorf("architecture not supported: %v", arch)
 	}
-	copy(extra.Arch[:], arch[:])
+	copy(extra.Arch[:], arch)
 
 	// serialize the partition data for integration with the base descriptor input
 	if err := binary.Write(&di.Extra, binary.LittleEndian, extra); err != nil {
@@ -447,7 +449,7 @@ func (di *DescriptorInput) SetPartExtra(fs Fstype, part Parttype, arch string) e
 	return nil
 }
 
-// SetSignExtra serializes the hash type and the entity info into a binary buffer
+// SetSignExtra serializes the hash type and the entity info into a binary buffer.
 func (di *DescriptorInput) SetSignExtra(hash Hashtype, entity string) error {
 	extra := Signature{
 		Hashtype: hash,
@@ -466,15 +468,29 @@ func (di *DescriptorInput) SetSignExtra(hash Hashtype, entity string) error {
 	return nil
 }
 
-// SetName sets the byte array field "Name" to the value of string "name"
+// SetCryptoMsgExtra serializes the message format and type info into a binary buffer.
+func (di *DescriptorInput) SetCryptoMsgExtra(format Formattype, message Messagetype) error {
+	extra := CryptoMessage{
+		Formattype:  format,
+		Messagetype: message,
+	}
+
+	// serialize the message data for integration with the base descriptor input
+	if err := binary.Write(&di.Extra, binary.LittleEndian, extra); err != nil {
+		return err
+	}
+	return nil
+}
+
+// SetName sets the byte array field "Name" to the value of string "name".
 func (d *Descriptor) SetName(name string) {
-	copy(d.Name[:], []byte(name))
+	copy(d.Name[:], name)
 	for i := len(name); i < len(d.Name); i++ {
 		d.Name[i] = 0
 	}
 }
 
-// SetExtra sets the extra byte array to a provided byte array
+// SetExtra sets the extra byte array to a provided byte array.
 func (d *Descriptor) SetExtra(extra []byte) {
 	copy(d.Extra[:], extra)
 	for i := len(extra); i < len(d.Extra); i++ {
@@ -482,7 +498,7 @@ func (d *Descriptor) SetExtra(extra []byte) {
 	}
 }
 
-// SetPrimPart sets the specified system partition to be the primary one
+// SetPrimPart sets the specified system partition to be the primary one.
 func (fimg *FileImage) SetPrimPart(id uint32) error {
 	descr, _, err := fimg.GetFromDescrID(id)
 	if err != nil {

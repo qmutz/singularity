@@ -11,7 +11,30 @@ import (
 	"time"
 )
 
-// readableSize returns the size in human readable format
+// String will return a string corresponding to the Datatype.
+func (d Datatype) String() string {
+	switch d {
+	case DataDeffile:
+		return "Def.FILE"
+	case DataEnvVar:
+		return "Env.Vars"
+	case DataLabels:
+		return "JSON.Labels"
+	case DataPartition:
+		return "FS"
+	case DataSignature:
+		return "Signature"
+	case DataGenericJSON:
+		return "JSON.Generic"
+	case DataGeneric:
+		return "Generic/Raw"
+	case DataCryptoMessage:
+		return "Cryptographic Message"
+	}
+	return "Unknown"
+}
+
+// readableSize returns the size in human readable format.
 func readableSize(size uint64) string {
 	var divs int
 	var conversion string
@@ -38,15 +61,15 @@ func readableSize(size uint64) string {
 	return conversion
 }
 
-// FmtHeader formats the output of a SIF file global header
+// FmtHeader formats the output of a SIF file global header.
 func (fimg *FileImage) FmtHeader() string {
-	s := fmt.Sprintln("Launch:  ", cstrToString(fimg.Header.Launch[:]))
-	s += fmt.Sprintln("Magic:   ", cstrToString(fimg.Header.Magic[:]))
-	s += fmt.Sprintln("Version: ", cstrToString(fimg.Header.Version[:]))
-	s += fmt.Sprintln("Arch:    ", GetGoArch(cstrToString(fimg.Header.Arch[:])))
+	s := fmt.Sprintln("Launch:  ", trimZeroBytes(fimg.Header.Launch[:]))
+	s += fmt.Sprintln("Magic:   ", trimZeroBytes(fimg.Header.Magic[:]))
+	s += fmt.Sprintln("Version: ", trimZeroBytes(fimg.Header.Version[:]))
+	s += fmt.Sprintln("Arch:    ", GetGoArch(trimZeroBytes(fimg.Header.Arch[:])))
 	s += fmt.Sprintln("ID:      ", fimg.Header.ID)
-	s += fmt.Sprintln("Ctime:   ", time.Unix(fimg.Header.Ctime, 0))
-	s += fmt.Sprintln("Mtime:   ", time.Unix(fimg.Header.Mtime, 0))
+	s += fmt.Sprintln("Ctime:   ", time.Unix(fimg.Header.Ctime, 0).UTC())
+	s += fmt.Sprintln("Mtime:   ", time.Unix(fimg.Header.Mtime, 0).UTC())
 	s += fmt.Sprintln("Dfree:   ", fimg.Header.Dfree)
 	s += fmt.Sprintln("Dtotal:  ", fimg.Header.Dtotal)
 	s += fmt.Sprintln("Descoff: ", fimg.Header.Descroff)
@@ -57,28 +80,7 @@ func (fimg *FileImage) FmtHeader() string {
 	return s
 }
 
-// datatypeStr returns a string representation of a datatype
-func datatypeStr(dtype Datatype) string {
-	switch dtype {
-	case DataDeffile:
-		return "Def.FILE"
-	case DataEnvVar:
-		return "Env.Vars"
-	case DataLabels:
-		return "JSON.Labels"
-	case DataPartition:
-		return "FS"
-	case DataSignature:
-		return "Signature"
-	case DataGenericJSON:
-		return "JSON.Generic"
-	case DataGeneric:
-		return "Generic/Raw"
-	}
-	return "Unknown data-type"
-}
-
-// fstypeStr returns a string representation of a file system type
+// fstypeStr returns a string representation of a file system type.
 func fstypeStr(ftype Fstype) string {
 	switch ftype {
 	case FsSquash:
@@ -89,11 +91,13 @@ func fstypeStr(ftype Fstype) string {
 		return "Archive"
 	case FsRaw:
 		return "Raw"
+	case FsEncryptedSquashfs:
+		return "Encrypted squashfs"
 	}
 	return "Unknown fs-type"
 }
 
-// parttypeStr returns a string representation of a partition type
+// parttypeStr returns a string representation of a partition type.
 func parttypeStr(ptype Parttype) string {
 	switch ptype {
 	case PartSystem:
@@ -108,7 +112,7 @@ func parttypeStr(ptype Parttype) string {
 	return "Unknown part-type"
 }
 
-// hashtypeStr returns a string representation of a  hash type
+// hashtypeStr returns a string representation of a  hash type.
 func hashtypeStr(htype Hashtype) string {
 	switch htype {
 	case HashSHA256:
@@ -125,7 +129,29 @@ func hashtypeStr(htype Hashtype) string {
 	return "Unknown hash-type"
 }
 
-// FmtDescrList formats the output of a list of all active descriptors from a SIF file
+// formattypeStr returns a string representation of a format type.
+func formattypeStr(ftype Formattype) string {
+	switch ftype {
+	case FormatOpenPGP:
+		return "OpenPGP"
+	case FormatPEM:
+		return "PEM"
+	}
+	return "Unknown format-type"
+}
+
+// messagetypeStr returns a string representation of a message type.
+func messagetypeStr(mtype Messagetype) string {
+	switch mtype {
+	case MessageClearSignature:
+		return "Clear Signature"
+	case MessageRSAOAEP:
+		return "RSA-OAEP"
+	}
+	return "Unknown message-type"
+}
+
+// FmtDescrList formats the output of a list of all active descriptors from a SIF file.
 func (fimg *FileImage) FmtDescrList() string {
 	s := fmt.Sprintf("%-4s %-8s %-8s %-26s %s\n", "ID", "|GROUP", "|LINK", "|SIF POSITION (start-end)", "|TYPE")
 	s += fmt.Sprintln("------------------------------------------------------------------------------")
@@ -158,12 +184,16 @@ func (fimg *FileImage) FmtDescrList() string {
 				f, _ := v.GetFsType()
 				p, _ := v.GetPartType()
 				a, _ := v.GetArch()
-				s += fmt.Sprintf("|%s (%s/%s/%s)\n", datatypeStr(v.Datatype), fstypeStr(f), parttypeStr(p), GetGoArch(cstrToString(a[:])))
+				s += fmt.Sprintf("|%s (%s/%s/%s)\n", v.Datatype, fstypeStr(f), parttypeStr(p), GetGoArch(trimZeroBytes(a[:])))
 			case DataSignature:
 				h, _ := v.GetHashType()
-				s += fmt.Sprintf("|%s (%s)\n", datatypeStr(v.Datatype), hashtypeStr(h))
+				s += fmt.Sprintf("|%s (%s)\n", v.Datatype, hashtypeStr(h))
+			case DataCryptoMessage:
+				f, _ := v.GetFormatType()
+				m, _ := v.GetMessageType()
+				s += fmt.Sprintf("|%s (%s/%s)\n", v.Datatype, formattypeStr(f), messagetypeStr(m))
 			default:
-				s += fmt.Sprintf("|%s\n", datatypeStr(v.Datatype))
+				s += fmt.Sprintf("|%s\n", v.Datatype)
 			}
 		}
 	}
@@ -171,16 +201,16 @@ func (fimg *FileImage) FmtDescrList() string {
 	return s
 }
 
-// FmtDescrInfo formats the ouput of detailed info about a descriptor from a SIF file
+// FmtDescrInfo formats the output of detailed info about a descriptor from a SIF file.
 func (fimg *FileImage) FmtDescrInfo(id uint32) string {
 	var s string
 
 	for i, v := range fimg.DescrArr {
 		if !v.Used {
 			continue
-		} else if v.ID == uint32(id) {
+		} else if v.ID == id {
 			s = fmt.Sprintln("Descr slot#:", i)
-			s += fmt.Sprintln("  Datatype: ", datatypeStr(v.Datatype))
+			s += fmt.Sprintln("  Datatype: ", v.Datatype)
 			s += fmt.Sprintln("  ID:       ", v.ID)
 			s += fmt.Sprintln("  Used:     ", v.Used)
 			if v.Groupid == DescrUnusedGroup {
@@ -199,11 +229,11 @@ func (fimg *FileImage) FmtDescrInfo(id uint32) string {
 			}
 			s += fmt.Sprintln("  Fileoff:  ", v.Fileoff)
 			s += fmt.Sprintln("  Filelen:  ", v.Filelen)
-			s += fmt.Sprintln("  Ctime:    ", time.Unix(v.Ctime, 0))
-			s += fmt.Sprintln("  Mtime:    ", time.Unix(v.Mtime, 0))
+			s += fmt.Sprintln("  Ctime:    ", time.Unix(v.Ctime, 0).UTC())
+			s += fmt.Sprintln("  Mtime:    ", time.Unix(v.Mtime, 0).UTC())
 			s += fmt.Sprintln("  UID:      ", v.UID)
 			s += fmt.Sprintln("  Gid:      ", v.Gid)
-			s += fmt.Sprintln("  Name:     ", string(v.Name[:]))
+			s += fmt.Sprintln("  Name:     ", trimZeroBytes(v.Name[:]))
 			switch v.Datatype {
 			case DataPartition:
 				f, _ := v.GetFsType()
@@ -211,12 +241,17 @@ func (fimg *FileImage) FmtDescrInfo(id uint32) string {
 				a, _ := v.GetArch()
 				s += fmt.Sprintln("  Fstype:   ", fstypeStr(f))
 				s += fmt.Sprintln("  Parttype: ", parttypeStr(p))
-				s += fmt.Sprintln("  Arch:     ", GetGoArch(cstrToString(a[:])))
+				s += fmt.Sprintln("  Arch:     ", GetGoArch(trimZeroBytes(a[:])))
 			case DataSignature:
 				h, _ := v.GetHashType()
 				e, _ := v.GetEntityString()
 				s += fmt.Sprintln("  Hashtype: ", hashtypeStr(h))
 				s += fmt.Sprintln("  Entity:   ", e)
+			case DataCryptoMessage:
+				f, _ := v.GetFormatType()
+				m, _ := v.GetMessageType()
+				s += fmt.Sprintln("  Fmttype:  ", formattypeStr(f))
+				s += fmt.Sprintln("  Msgtype:  ", messagetypeStr(m))
 			}
 
 			return s

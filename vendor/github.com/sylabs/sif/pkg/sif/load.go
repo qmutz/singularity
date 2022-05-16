@@ -11,11 +11,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"syscall"
 )
 
-// Read the global header from the container file
+// Read the global header from the container file.
 func readHeader(fimg *FileImage) error {
 	if err := binary.Read(fimg.Reader, binary.LittleEndian, &fimg.Header); err != nil {
 		return fmt.Errorf("reading global header from container file: %s", err)
@@ -24,7 +26,7 @@ func readHeader(fimg *FileImage) error {
 	return nil
 }
 
-// Read the used descriptors and populate an in-memory representation of those in node list
+// Read the used descriptors and populate an in-memory representation of those in node list.
 func readDescriptors(fimg *FileImage) error {
 	// start by positioning us to the start of descriptors
 	_, err := fimg.Reader.Seek(fimg.Header.Descroff, 0)
@@ -51,54 +53,74 @@ func readDescriptors(fimg *FileImage) error {
 // `runnable' checks is current container can run on host.
 func isValidSif(fimg *FileImage) error {
 	// check various header fields
-	if cstrToString(fimg.Header.Magic[:]) != HdrMagic {
-		return fmt.Errorf("invalid SIF file: Magic |%s| want |%s|", fimg.Header.Magic, HdrMagic)
+	if trimZeroBytes(fimg.Header.Magic[:]) != HdrMagic {
+		return fmt.Errorf("invalid SIF file: Magic |%s| want |%s|", trimZeroBytes(fimg.Header.Magic[:]), HdrMagic)
 	}
-	if cstrToString(fimg.Header.Version[:]) > HdrVersion {
-		return fmt.Errorf("invalid SIF file: Version %s want <= %s", fimg.Header.Version, HdrVersion)
+	if trimZeroBytes(fimg.Header.Version[:]) > HdrVersion {
+		return fmt.Errorf("invalid SIF file: Version %s want <= %s", trimZeroBytes(fimg.Header.Version[:]), HdrVersion)
 	}
 
 	return nil
 }
 
-// mapFile takes a file pointer and returns a slice of bytes representing the file data
+// mapFile takes a file pointer and returns a slice of bytes representing the file data.
 func (fimg *FileImage) mapFile(rdonly bool) error {
-	prot := syscall.PROT_READ
-	flags := syscall.MAP_PRIVATE
-
 	info, err := fimg.Fp.Stat()
 	if err != nil {
 		return fmt.Errorf("while trying to size SIF file to mmap")
 	}
-	fimg.Filesize = info.Size()
 
-	size := nextAligned(info.Size(), syscall.Getpagesize())
-	if int64(int(size)) < info.Size() {
-		return fmt.Errorf("file is to big to be mapped")
+	switch info.Mode() & os.ModeType {
+	case 0:
+		// regular file
+		fimg.Filesize = info.Size()
+	case os.ModeDevice:
+		// block device
+		fimg.Amodebuf = true
+		fimg.Filesize, err = fimg.Fp.Seek(0, io.SeekEnd)
+		if err != nil {
+			return fmt.Errorf("while getting block device size: %s", err)
+		}
+	default:
+		return fmt.Errorf("%s is neither a file nor a block device", fimg.Fp.Name())
 	}
 
-	if !rdonly {
-		prot = syscall.PROT_WRITE
-		flags = syscall.MAP_SHARED
+	fimg.Filedata = nil
+
+	if !fimg.Amodebuf {
+		prot := syscall.PROT_READ
+		flags := syscall.MAP_PRIVATE
+
+		if !rdonly {
+			prot = syscall.PROT_WRITE
+			flags = syscall.MAP_SHARED
+		}
+
+		size := nextAligned(fimg.Filesize, syscall.Getpagesize())
+		if int64(int(size)) < fimg.Filesize {
+			return fmt.Errorf("file is too big to be mapped")
+		}
+
+		fimg.Filedata, err = syscall.Mmap(int(fimg.Fp.Fd()), 0, int(size), prot, flags)
+		if err != nil {
+			// mmap failed, use sequential read() instead for top of file
+			log.Printf("mmap on %s failed (%s), reading buffer sequentially...", err, fimg.Fp.Name())
+			fimg.Amodebuf = true
+		}
 	}
 
-	fimg.Filedata, err = syscall.Mmap(int(fimg.Fp.Fd()), 0, int(size), prot, flags)
-	if err != nil {
-		// mmap failed, use sequential read() instead for top of file
-		siflog.Printf("mmap on %s failed, reading buffer sequentially...", fimg.Fp.Name())
+	if fimg.Filedata == nil {
 		fimg.Filedata = make([]byte, DataStartOffset)
 
 		// start by positioning us to the start of the file
-		_, err := fimg.Fp.Seek(0, 0)
+		_, err := fimg.Fp.Seek(0, io.SeekStart)
 		if err != nil {
 			return fmt.Errorf("seek() setting to start of file: %s", err)
 		}
 
 		if n, err := fimg.Fp.Read(fimg.Filedata); n != DataStartOffset {
 			return fmt.Errorf("short read while reading top of file: %v", err)
-
 		}
-		fimg.Amodebuf = true
 	}
 
 	// create and associate a new bytes.Reader on top of mmap'ed or buffered data from file
@@ -120,31 +142,42 @@ func (fimg *FileImage) unmapFile() error {
 // LoadContainer is responsible for loading a SIF container file. It takes
 // the container file name, and whether the file is opened as read-only
 // as arguments.
-func LoadContainer(filename string, rdonly bool) (fimg FileImage, err error) {
-	var fp ReadWriter
-
-	if rdonly { // open SIF rdonly if mounting immutable partitions or inspecting the image
-		if fp, err = os.Open(filename); err != nil {
-			return fimg, fmt.Errorf("opening(RDONLY) container file: %s", err)
-		}
-	} else { // open SIF read-write when adding and removing data objects
-		if fp, err = os.OpenFile(filename, os.O_RDWR, 0644); err != nil {
-			return fimg, fmt.Errorf("opening(RDWR) container file: %s", err)
-		}
+func LoadContainer(filename string, rdonly bool) (FileImage, error) {
+	mode := os.O_RDWR // open SIF read-write when adding and removing data objects
+	if rdonly {
+		mode = os.O_RDONLY // open SIF rdonly if mounting immutable partitions or inspecting the image
 	}
 
-	return LoadContainerFp(fp, rdonly)
+	f, err := os.OpenFile(filename, mode, 0)
+	if err != nil {
+		return FileImage{}, fmt.Errorf("opening(%s) container file: %v", modeToStr(mode), err)
+	}
+
+	fimg, err := LoadContainerFp(f, rdonly)
+	if err != nil {
+		_ = f.Close()
+		return FileImage{}, err
+	}
+
+	return fimg, nil
 }
 
 // LoadContainerFp is responsible for loading a SIF container file. It takes
-// a *os.File pointing to an opened file, and whether the file is opened as
+// a ReadWriter pointing to an opened file, and whether the file is opened as
 // read-only for arguments.
 func LoadContainerFp(fp ReadWriter, rdonly bool) (fimg FileImage, err error) {
 	if fp == nil {
 		return fimg, fmt.Errorf("provided fp for file is invalid")
 	}
-
 	fimg.Fp = fp
+
+	defer func() {
+		if err != nil {
+			if err := fimg.unmapFile(); err != nil {
+				log.Printf("could not unmap SIF: %v", err)
+			}
+		}
+	}()
 
 	// get a memory map of the SIF file
 	if err = fimg.mapFile(rdonly); err != nil {
@@ -194,7 +227,7 @@ func LoadContainerReader(b *bytes.Reader) (fimg FileImage, err error) {
 	return fimg, err
 }
 
-// UnloadContainer closes the SIF container file and free associated resources if needed
+// UnloadContainer closes the SIF container file and free associated resources if needed.
 func (fimg *FileImage) UnloadContainer() (err error) {
 	// if SIF data comes from file, not a slice buffer (see LoadContainer() variants)
 	if fimg.Fp != nil {
@@ -208,10 +241,16 @@ func (fimg *FileImage) UnloadContainer() (err error) {
 	return
 }
 
-func cstrToString(str []byte) string {
-	n := len(str)
-	if m := n - 1; str[m] == 0 {
-		n = m
+func trimZeroBytes(str []byte) string {
+	return string(bytes.TrimRight(str, "\x00"))
+}
+
+func modeToStr(mode int) string {
+	switch mode {
+	case os.O_RDONLY:
+		return "RDONLY"
+	case os.O_RDWR:
+		return "RDWR"
 	}
-	return string(str[:n])
+	return ""
 }
