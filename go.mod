@@ -57,9 +57,9 @@ require (
 	github.com/opencontainers/runc v0.1.1 // indirect
 	github.com/opencontainers/runtime-spec v0.0.0-20180913141938-5806c3563733
 	github.com/opencontainers/runtime-tools v0.6.0
-	github.com/opencontainers/selinux v1.0.0-rc1
+	github.com/opencontainers/selinux v1.3.1
 	github.com/pelletier/go-toml v1.2.0
-	github.com/pkg/errors v0.8.0
+	github.com/pkg/errors v0.8.1
 	github.com/pquerna/ffjson v0.0.0-20171002144729-d49c2bc1aa13 // indirect
 	github.com/prometheus/client_golang v0.0.0-20180607123607-faf4ec335fe0 // indirect
 	github.com/prometheus/client_model v0.0.0-20171117100541-99fa1f4be8e5 // indirect
@@ -83,7 +83,7 @@ require (
 	go4.org v0.0.0-20180417224846-9599cf28b011 // indirect
 	golang.org/x/crypto v0.0.0-20181203042331-505ab145d0a9
 	golang.org/x/sync v0.0.0-20190227155943-e225da77a7e6 // indirect
-	golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223
+	golang.org/x/sys v0.0.0-20191115151921-52ab43148777
 	gopkg.in/airbrake/gobrake.v2 v2.0.9 // indirect
 	gopkg.in/cheggaaa/pb.v1 v1.0.25
 	gopkg.in/gemnasium/logrus-airbrake-hook.v2 v2.1.2 // indirect
