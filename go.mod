@@ -5,7 +5,6 @@ go 1.11
 require (
 	github.com/Microsoft/go-winio v0.4.7 // indirect
 	github.com/alexflint/go-filemutex v0.0.0-20171028004239-d358565f3c3f // indirect
-	github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/containerd/cgroups v0.0.0-20181208203134-65ce98b3dfeb
 	github.com/containerd/continuity v0.0.0-20180612233548-246e49050efd // indirect
@@ -31,7 +30,6 @@ require (
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/globalsign/mgo v0.0.0-20180615134936-113d3961e731
 	github.com/godbus/dbus v4.1.0+incompatible // indirect
-	github.com/gogo/protobuf v1.0.0 // indirect
 	github.com/gorilla/context v1.1.1 // indirect
 	github.com/gorilla/mux v1.6.2 // indirect
 	github.com/gorilla/websocket v1.2.0
@@ -47,7 +45,6 @@ require (
 	github.com/mattn/go-colorable v0.1.1 // indirect
 	github.com/mattn/go-runewidth v0.0.2 // indirect
 	github.com/mattn/go-shellwords v1.0.3 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/mtrmac/gpgme v0.0.0-20170102180018-b2432428689c // indirect
 	github.com/onsi/ginkgo v1.8.0 // indirect
 	github.com/onsi/gomega v1.5.0 // indirect
@@ -59,16 +56,12 @@ require (
 	github.com/opencontainers/runtime-tools v0.6.0
 	github.com/opencontainers/selinux v1.0.0-rc1
 	github.com/pelletier/go-toml v1.2.0
-	github.com/pkg/errors v0.8.0
+	github.com/pkg/errors v0.9.1
 	github.com/pquerna/ffjson v0.0.0-20171002144729-d49c2bc1aa13 // indirect
-	github.com/prometheus/client_golang v0.0.0-20180607123607-faf4ec335fe0 // indirect
-	github.com/prometheus/client_model v0.0.0-20171117100541-99fa1f4be8e5 // indirect
-	github.com/prometheus/common v0.0.0-20180518154759-7600349dcfe1 // indirect
-	github.com/prometheus/procfs v0.0.0-20180612222113-7d6f385de8be // indirect
+	github.com/prometheus/client_golang v1.11.1 // indirect
 	github.com/safchain/ethtool v0.0.0-20180504150752-6e3f4faa84e1 // indirect
 	github.com/satori/go.uuid v1.2.0
 	github.com/seccomp/libseccomp-golang v0.9.0
-	github.com/sirupsen/logrus v1.0.5 // indirect
 	github.com/spf13/cobra v0.0.0-20190321000552-67fc4837d267
 	github.com/spf13/pflag v1.0.3
 	github.com/sylabs/json-resp v0.5.0
@@ -81,13 +74,10 @@ require (
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/xeipuuv/gojsonschema v0.0.0-20180618132009-1d523034197f // indirect
 	go4.org v0.0.0-20180417224846-9599cf28b011 // indirect
-	golang.org/x/crypto v0.0.0-20181203042331-505ab145d0a9
-	golang.org/x/sync v0.0.0-20190227155943-e225da77a7e6 // indirect
-	golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223
-	gopkg.in/airbrake/gobrake.v2 v2.0.9 // indirect
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40
 	gopkg.in/cheggaaa/pb.v1 v1.0.25
-	gopkg.in/gemnasium/logrus-airbrake-hook.v2 v2.1.2 // indirect
-	gopkg.in/yaml.v2 v2.2.2
+	gopkg.in/yaml.v2 v2.3.0
 	gotest.tools v2.3.0+incompatible // indirect
 	k8s.io/client-go v11.0.0+incompatible // indirect
 )
