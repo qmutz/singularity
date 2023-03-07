@@ -25,7 +25,7 @@ import (
 
 type Path func(subsystem Name) (string, error)
 
-func RootPath(subsysem Name) (string, error) {
+func RootPath(subsystem Name) (string, error) {
 	return "/", nil
 }
 
@@ -57,10 +57,13 @@ func PidPath(pid int) Path {
 	return existingPath(paths, "")
 }
 
+// ErrControllerNotActive is returned when a controller is not supported or enabled
+var ErrControllerNotActive = errors.New("controller is not supported")
+
 func existingPath(paths map[string]string, suffix string) Path {
 	// localize the paths based on the root mount dest for nested cgroups
 	for n, p := range paths {
-		dest, err := getCgroupDestination(string(n))
+		dest, err := getCgroupDestination(n)
 		if err != nil {
 			return errorPath(err)
 		}
@@ -76,8 +79,8 @@ func existingPath(paths map[string]string, suffix string) Path {
 	return func(name Name) (string, error) {
 		root, ok := paths[string(name)]
 		if !ok {
-			if root, ok = paths[fmt.Sprintf("name=%s", name)]; !ok {
-				return "", fmt.Errorf("unable to find %q in controller set", name)
+			if root, ok = paths["name="+string(name)]; !ok {
+				return "", ErrControllerNotActive
 			}
 		}
 		if suffix != "" {
