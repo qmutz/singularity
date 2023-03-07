@@ -4,9 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/user"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+
+	"github.com/containers/storage/pkg/system"
+	"github.com/pkg/errors"
 )
 
 // IDMap contains a single entry for user namespace range remapping. An array
@@ -72,13 +77,23 @@ func MkdirAllAndChownNew(path string, mode os.FileMode, ids IDPair) error {
 // GetRootUIDGID retrieves the remapped root uid/gid pair from the set of maps.
 // If the maps are empty, then the root uid/gid will default to "real" 0/0
 func GetRootUIDGID(uidMap, gidMap []IDMap) (int, int, error) {
-	uid, err := toHost(0, uidMap)
-	if err != nil {
-		return -1, -1, err
+	var uid, gid int
+	var err error
+	if len(uidMap) == 1 && uidMap[0].Size == 1 {
+		uid = uidMap[0].HostID
+	} else {
+		uid, err = toHost(0, uidMap)
+		if err != nil {
+			return -1, -1, err
+		}
 	}
-	gid, err := toHost(0, gidMap)
-	if err != nil {
-		return -1, -1, err
+	if len(gidMap) == 1 && gidMap[0].Size == 1 {
+		gid = gidMap[0].HostID
+	} else {
+		gid, err = toHost(0, gidMap)
+		if err != nil {
+			return -1, -1, err
+		}
 	}
 	return uid, gid, nil
 }
@@ -140,10 +155,10 @@ func NewIDMappings(username, groupname string) (*IDMappings, error) {
 		return nil, err
 	}
 	if len(subuidRanges) == 0 {
-		return nil, fmt.Errorf("No subuid ranges found for user %q", username)
+		return nil, fmt.Errorf("No subuid ranges found for user %q in %s", username, subuidFileName)
 	}
 	if len(subgidRanges) == 0 {
-		return nil, fmt.Errorf("No subgid ranges found for group %q", groupname)
+		return nil, fmt.Errorf("No subgid ranges found for group %q in %s", groupname, subgidFileName)
 	}
 
 	return &IDMappings{
@@ -241,7 +256,13 @@ func parseSubgid(username string) (ranges, error) {
 // and return all found ranges for a specified username. If the special value
 // "ALL" is supplied for username, then all ranges in the file will be returned
 func parseSubidFile(path, username string) (ranges, error) {
-	var rangeList ranges
+	var (
+		rangeList ranges
+		uidstr    string
+	)
+	if u, err := user.Lookup(username); err == nil {
+		uidstr = u.Uid
+	}
 
 	subidFile, err := os.Open(path)
 	if err != nil {
@@ -263,7 +284,7 @@ func parseSubidFile(path, username string) (ranges, error) {
 		if len(parts) != 3 {
 			return rangeList, fmt.Errorf("Cannot parse subuid/gid information: Format not correct for %s file", path)
 		}
-		if parts[0] == username || username == "ALL" {
+		if parts[0] == username || username == "ALL" || (parts[0] == uidstr && parts[0] != "") {
 			startid, err := strconv.Atoi(parts[1])
 			if err != nil {
 				return rangeList, fmt.Errorf("String to int conversion failed during subuid/gid parsing of %s: %v", path, err)
@@ -276,4 +297,29 @@ func parseSubidFile(path, username string) (ranges, error) {
 		}
 	}
 	return rangeList, nil
+}
+
+func checkChownErr(err error, name string, uid, gid int) error {
+	if e, ok := err.(*os.PathError); ok && e.Err == syscall.EINVAL {
+		return errors.Wrapf(err, "potentially insufficient UIDs or GIDs available in user namespace (requested %d:%d for %s): Check /etc/subuid and /etc/subgid", uid, gid, name)
+	}
+	return err
+}
+
+func SafeChown(name string, uid, gid int) error {
+	if stat, statErr := system.Stat(name); statErr == nil {
+		if stat.UID() == uint32(uid) && stat.GID() == uint32(gid) {
+			return nil
+		}
+	}
+	return checkChownErr(os.Chown(name, uid, gid), name, uid, gid)
+}
+
+func SafeLchown(name string, uid, gid int) error {
+	if stat, statErr := system.Lstat(name); statErr == nil {
+		if stat.UID() == uint32(uid) && stat.GID() == uint32(gid) {
+			return nil
+		}
+	}
+	return checkChownErr(os.Lchown(name, uid, gid), name, uid, gid)
 }

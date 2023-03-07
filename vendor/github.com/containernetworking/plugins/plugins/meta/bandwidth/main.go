@@ -15,28 +15,34 @@
 package main
 
 import (
-	"crypto/sha1"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"math"
+
+	"github.com/vishvananda/netlink"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
-	"github.com/containernetworking/plugins/pkg/ip"
 
-	"github.com/vishvananda/netlink"
+	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/utils"
+	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 )
+
+const maxIfbDeviceLength = 15
+const ifbDevicePrefix = "bwp"
 
 // BandwidthEntry corresponds to a single entry in the bandwidth argument,
 // see CONVENTIONS.md
 type BandwidthEntry struct {
-	IngressRate  int `json:"ingressRate"`  //Bandwidth rate in Kbps for traffic through container. 0 for no limit. If ingressRate is set, ingressBurst must also be set
-	IngressBurst int `json:"ingressBurst"` //Bandwidth burst in Kb for traffic through container. 0 for no limit. If ingressBurst is set, ingressRate must also be set
+	IngressRate  uint64 `json:"ingressRate"`  //Bandwidth rate in bps for traffic through container. 0 for no limit. If ingressRate is set, ingressBurst must also be set
+	IngressBurst uint64 `json:"ingressBurst"` //Bandwidth burst in bits for traffic through container. 0 for no limit. If ingressBurst is set, ingressRate must also be set
 
-	EgressRate  int `json:"egressRate"`  //Bandwidth rate in Kbps for traffic through container. 0 for no limit. If egressRate is set, egressBurst must also be set
-	EgressBurst int `json:"egressBurst"` //Bandwidth burst in Kb for traffic through container. 0 for no limit. If egressBurst is set, egressRate must also be set
+	EgressRate  uint64 `json:"egressRate"`  //Bandwidth rate in bps for traffic through container. 0 for no limit. If egressRate is set, egressBurst must also be set
+	EgressBurst uint64 `json:"egressBurst"` //Bandwidth burst in bits for traffic through container. 0 for no limit. If egressBurst is set, egressRate must also be set
 }
 
 func (bw *BandwidthEntry) isZero() bool {
@@ -50,10 +56,6 @@ type PluginConf struct {
 		Bandwidth *BandwidthEntry `json:"bandwidth,omitempty"`
 	} `json:"runtimeConfig,omitempty"`
 
-	// RuntimeConfig *struct{} `json:"runtimeConfig"`
-
-	RawPrevResult *map[string]interface{} `json:"prevResult"`
-	PrevResult    *current.Result         `json:"-"`
 	*BandwidthEntry
 }
 
@@ -65,21 +67,6 @@ func parseConfig(stdin []byte) (*PluginConf, error) {
 		return nil, fmt.Errorf("failed to parse network configuration: %v", err)
 	}
 
-	if conf.RawPrevResult != nil {
-		resultBytes, err := json.Marshal(conf.RawPrevResult)
-		if err != nil {
-			return nil, fmt.Errorf("could not serialize prevResult: %v", err)
-		}
-		res, err := version.NewResult(conf.CNIVersion, resultBytes)
-		if err != nil {
-			return nil, fmt.Errorf("could not parse prevResult: %v", err)
-		}
-		conf.RawPrevResult = nil
-		conf.PrevResult, err = current.NewResultFromResult(res)
-		if err != nil {
-			return nil, fmt.Errorf("could not convert result to current version: %v", err)
-		}
-	}
 	bandwidth := getBandwidth(&conf)
 	if bandwidth != nil {
 		err := validateRateAndBurst(bandwidth.IngressRate, bandwidth.IngressBurst)
@@ -89,6 +76,18 @@ func parseConfig(stdin []byte) (*PluginConf, error) {
 		err = validateRateAndBurst(bandwidth.EgressRate, bandwidth.EgressBurst)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	if conf.RawPrevResult != nil {
+		var err error
+		if err = version.ParsePrevResult(&conf.NetConf); err != nil {
+			return nil, fmt.Errorf("could not parse prevResult: %v", err)
+		}
+
+		_, err = current.NewResultFromResult(conf.PrevResult)
+		if err != nil {
+			return nil, fmt.Errorf("could not convert result to current version: %v", err)
 		}
 	}
 
@@ -103,7 +102,7 @@ func getBandwidth(conf *PluginConf) *BandwidthEntry {
 	return conf.BandwidthEntry
 }
 
-func validateRateAndBurst(rate int, burst int) error {
+func validateRateAndBurst(rate, burst uint64) error {
 	switch {
 	case burst < 0 || rate < 0:
 		return fmt.Errorf("rate and burst must be a positive integer")
@@ -111,19 +110,15 @@ func validateRateAndBurst(rate int, burst int) error {
 		return fmt.Errorf("if rate is set, burst must also be set")
 	case rate == 0 && burst != 0:
 		return fmt.Errorf("if burst is set, rate must also be set")
+	case burst/8 >= math.MaxUint32:
+		return fmt.Errorf("burst cannot be more than 4GB")
 	}
 
 	return nil
 }
 
-func getIfbDeviceName(networkName string, containerId string) (string, error) {
-	hash := sha1.New()
-	_, err := hash.Write([]byte(networkName + containerId))
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%x", hash.Sum(nil))[:4], nil
+func getIfbDeviceName(networkName string, containerId string) string {
+	return utils.MustFormatHashWithPrefix(maxIfbDeviceLength, ifbDevicePrefix, networkName+containerId)
 }
 
 func getMTU(deviceName string) (int, error) {
@@ -135,21 +130,35 @@ func getMTU(deviceName string) (int, error) {
 	return link.Attrs().MTU, nil
 }
 
-func getHostInterface(interfaces []*current.Interface) (*current.Interface, error) {
+// get the veth peer of container interface in host namespace
+func getHostInterface(interfaces []*current.Interface, containerIfName string, netns ns.NetNS) (*current.Interface, error) {
 	if len(interfaces) == 0 {
-		return nil, errors.New("no interfaces provided")
+		return nil, fmt.Errorf("no interfaces provided")
 	}
 
+	// get veth peer index of container interface
+	var peerIndex int
 	var err error
+	_ = netns.Do(func(_ ns.NetNS) error {
+		_, peerIndex, err = ip.GetVethPeerIfindex(containerIfName)
+		return nil
+	})
+	if peerIndex <= 0 {
+		return nil, fmt.Errorf("container interface %s has no veth peer: %v", containerIfName, err)
+	}
+
+	// find host interface by index
+	link, err := netlink.LinkByIndex(peerIndex)
+	if err != nil {
+		return nil, fmt.Errorf("veth peer with index %d is not in host ns", peerIndex)
+	}
 	for _, iface := range interfaces {
-		if iface.Sandbox == "" { // host interface
-			_, _, err = ip.GetVethPeerIfindex(iface.Name)
-			if err == nil {
-				return iface, err
-			}
+		if iface.Sandbox == "" && iface.Name == link.Attrs().Name {
+			return iface, nil
 		}
 	}
-	return nil, errors.New(fmt.Sprintf("no host interface found. last error: %s", err))
+
+	return nil, fmt.Errorf("no veth peer of container interface found in host ns")
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
@@ -167,7 +176,18 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("must be called as chained plugin")
 	}
 
-	hostInterface, err := getHostInterface(conf.PrevResult.Interfaces)
+	result, err := current.NewResultFromResult(conf.PrevResult)
+	if err != nil {
+		return fmt.Errorf("could not convert result to current version: %v", err)
+	}
+
+	netns, err := ns.GetNS(args.Netns)
+	if err != nil {
+		return fmt.Errorf("failed to open netns %q: %v", netns, err)
+	}
+	defer netns.Close()
+
+	hostInterface, err := getHostInterface(result.Interfaces, args.IfName, netns)
 	if err != nil {
 		return err
 	}
@@ -185,10 +205,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
-		ifbDeviceName, err := getIfbDeviceName(conf.Name, args.ContainerID)
-		if err != nil {
-			return err
-		}
+		ifbDeviceName := getIfbDeviceName(conf.Name, args.ContainerID)
 
 		err = CreateIfb(ifbDeviceName, mtu)
 		if err != nil {
@@ -200,7 +217,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
-		conf.PrevResult.Interfaces = append(conf.PrevResult.Interfaces, &current.Interface{
+		result.Interfaces = append(result.Interfaces, &current.Interface{
 			Name: ifbDeviceName,
 			Mac:  ifbDevice.Attrs().HardwareAddr.String(),
 		})
@@ -210,7 +227,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	}
 
-	return types.PrintResult(conf.PrevResult, conf.CNIVersion)
+	return types.PrintResult(result, conf.CNIVersion)
 }
 
 func cmdDel(args *skel.CmdArgs) error {
@@ -219,10 +236,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	ifbDeviceName, err := getIfbDeviceName(conf.Name, args.ContainerID)
-	if err != nil {
-		return err
-	}
+	ifbDeviceName := getIfbDeviceName(conf.Name, args.ContainerID)
 
 	if err := TeardownIfb(ifbDeviceName); err != nil {
 		return err
@@ -232,5 +246,128 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
-	skel.PluginMain(cmdAdd, cmdDel, version.PluginSupports("0.3.0", "0.3.1", version.Current()))
+	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.PluginSupports("0.3.0", "0.3.1", version.Current()), bv.BuildString("bandwidth"))
+}
+
+func SafeQdiscList(link netlink.Link) ([]netlink.Qdisc, error) {
+	qdiscs, err := netlink.QdiscList(link)
+	if err != nil {
+		return nil, err
+	}
+	result := []netlink.Qdisc{}
+	for _, qdisc := range qdiscs {
+		// filter out pfifo_fast qdiscs because
+		// older kernels don't return them
+		_, pfifo := qdisc.(*netlink.PfifoFast)
+		if !pfifo {
+			result = append(result, qdisc)
+		}
+	}
+	return result, nil
+}
+
+func cmdCheck(args *skel.CmdArgs) error {
+	bwConf, err := parseConfig(args.StdinData)
+	if err != nil {
+		return err
+	}
+
+	if bwConf.PrevResult == nil {
+		return fmt.Errorf("must be called as a chained plugin")
+	}
+
+	result, err := current.NewResultFromResult(bwConf.PrevResult)
+	if err != nil {
+		return fmt.Errorf("could not convert result to current version: %v", err)
+	}
+
+	netns, err := ns.GetNS(args.Netns)
+	if err != nil {
+		return fmt.Errorf("failed to open netns %q: %v", netns, err)
+	}
+	defer netns.Close()
+
+	hostInterface, err := getHostInterface(result.Interfaces, args.IfName, netns)
+	if err != nil {
+		return err
+	}
+	link, err := netlink.LinkByName(hostInterface.Name)
+	if err != nil {
+		return err
+	}
+
+	bandwidth := getBandwidth(bwConf)
+
+	if bandwidth.IngressRate > 0 && bandwidth.IngressBurst > 0 {
+		rateInBytes := bandwidth.IngressRate / 8
+		burstInBytes := bandwidth.IngressBurst / 8
+		bufferInBytes := buffer(uint64(rateInBytes), uint32(burstInBytes))
+		latency := latencyInUsec(latencyInMillis)
+		limitInBytes := limit(uint64(rateInBytes), latency, uint32(burstInBytes))
+
+		qdiscs, err := SafeQdiscList(link)
+		if err != nil {
+			return err
+		}
+		if len(qdiscs) == 0 {
+			return fmt.Errorf("Failed to find qdisc")
+		}
+
+		for _, qdisc := range qdiscs {
+			tbf, isTbf := qdisc.(*netlink.Tbf)
+			if !isTbf {
+				break
+			}
+			if tbf.Rate != uint64(rateInBytes) {
+				return fmt.Errorf("Rate doesn't match")
+			}
+			if tbf.Limit != uint32(limitInBytes) {
+				return fmt.Errorf("Limit doesn't match")
+			}
+			if tbf.Buffer != uint32(bufferInBytes) {
+				return fmt.Errorf("Buffer doesn't match")
+			}
+		}
+	}
+
+	if bandwidth.EgressRate > 0 && bandwidth.EgressBurst > 0 {
+		rateInBytes := bandwidth.EgressRate / 8
+		burstInBytes := bandwidth.EgressBurst / 8
+		bufferInBytes := buffer(uint64(rateInBytes), uint32(burstInBytes))
+		latency := latencyInUsec(latencyInMillis)
+		limitInBytes := limit(uint64(rateInBytes), latency, uint32(burstInBytes))
+
+		ifbDeviceName := getIfbDeviceName(bwConf.Name, args.ContainerID)
+
+		ifbDevice, err := netlink.LinkByName(ifbDeviceName)
+		if err != nil {
+			return fmt.Errorf("get ifb device: %s", err)
+		}
+
+		qdiscs, err := SafeQdiscList(ifbDevice)
+		if err != nil {
+			return err
+		}
+		if len(qdiscs) == 0 {
+			return fmt.Errorf("Failed to find qdisc")
+		}
+
+		for _, qdisc := range qdiscs {
+			tbf, isTbf := qdisc.(*netlink.Tbf)
+			if !isTbf {
+				break
+			}
+			if tbf.Rate != uint64(rateInBytes) {
+				return fmt.Errorf("Rate doesn't match")
+			}
+			if tbf.Limit != uint32(limitInBytes) {
+				return fmt.Errorf("Limit doesn't match")
+			}
+			if tbf.Buffer != uint32(bufferInBytes) {
+				return fmt.Errorf("Buffer doesn't match")
+			}
+		}
+	}
+
+	return nil
 }

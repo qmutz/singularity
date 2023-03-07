@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/containers/storage/pkg/idtools"
 	fflib "github.com/pquerna/ffjson/fflib/v1"
+	"os"
 )
 
 // MarshalJSON marshal bytes to json - template
@@ -445,6 +446,11 @@ func (j *TarOptions) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	} else {
 		buf.WriteString(`null`)
 	}
+	if j.IgnoreChownErrors {
+		buf.WriteString(`,"IgnoreChownErrors":true`)
+	} else {
+		buf.WriteString(`,"IgnoreChownErrors":false`)
+	}
 	if j.ChownOpts != nil {
 		/* Struct fall back. type=idtools.IDPair kind=struct */
 		buf.WriteString(`,"ChownOpts":`)
@@ -496,6 +502,12 @@ func (j *TarOptions) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	} else {
 		buf.WriteString(`,"CopyPass":false`)
 	}
+	if j.ForceMask != nil {
+		buf.WriteString(`,"ForceMask":`)
+		fflib.FormatBits2(buf, uint64(*j.ForceMask), 10, false)
+	} else {
+		buf.WriteString(`,"ForceMask":null`)
+	}
 	buf.WriteByte('}')
 	return nil
 }
@@ -516,6 +528,8 @@ const (
 
 	ffjtTarOptionsGIDMaps
 
+	ffjtTarOptionsIgnoreChownErrors
+
 	ffjtTarOptionsChownOpts
 
 	ffjtTarOptionsIncludeSourceDir
@@ -531,6 +545,8 @@ const (
 	ffjtTarOptionsInUserNS
 
 	ffjtTarOptionsCopyPass
+
+	ffjtTarOptionsForceMask
 )
 
 var ffjKeyTarOptionsIncludeFiles = []byte("IncludeFiles")
@@ -544,6 +560,8 @@ var ffjKeyTarOptionsNoLchown = []byte("NoLchown")
 var ffjKeyTarOptionsUIDMaps = []byte("UIDMaps")
 
 var ffjKeyTarOptionsGIDMaps = []byte("GIDMaps")
+
+var ffjKeyTarOptionsIgnoreChownErrors = []byte("IgnoreChownErrors")
 
 var ffjKeyTarOptionsChownOpts = []byte("ChownOpts")
 
@@ -560,6 +578,8 @@ var ffjKeyTarOptionsRebaseNames = []byte("RebaseNames")
 var ffjKeyTarOptionsInUserNS = []byte("InUserNS")
 
 var ffjKeyTarOptionsCopyPass = []byte("CopyPass")
+
+var ffjKeyTarOptionsForceMask = []byte("ForceMask")
 
 // UnmarshalJSON umarshall json - template of ffjson
 func (j *TarOptions) UnmarshalJSON(input []byte) error {
@@ -648,6 +668,14 @@ mainparse:
 						goto mainparse
 					}
 
+				case 'F':
+
+					if bytes.Equal(ffjKeyTarOptionsForceMask, kn) {
+						currentKey = ffjtTarOptionsForceMask
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
 				case 'G':
 
 					if bytes.Equal(ffjKeyTarOptionsGIDMaps, kn) {
@@ -660,6 +688,11 @@ mainparse:
 
 					if bytes.Equal(ffjKeyTarOptionsIncludeFiles, kn) {
 						currentKey = ffjtTarOptionsIncludeFiles
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyTarOptionsIgnoreChownErrors, kn) {
+						currentKey = ffjtTarOptionsIgnoreChownErrors
 						state = fflib.FFParse_want_colon
 						goto mainparse
 
@@ -718,6 +751,12 @@ mainparse:
 
 				}
 
+				if fflib.EqualFoldRight(ffjKeyTarOptionsForceMask, kn) {
+					currentKey = ffjtTarOptionsForceMask
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
 				if fflib.EqualFoldRight(ffjKeyTarOptionsCopyPass, kn) {
 					currentKey = ffjtTarOptionsCopyPass
 					state = fflib.FFParse_want_colon
@@ -762,6 +801,12 @@ mainparse:
 
 				if fflib.EqualFoldRight(ffjKeyTarOptionsChownOpts, kn) {
 					currentKey = ffjtTarOptionsChownOpts
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyTarOptionsIgnoreChownErrors, kn) {
+					currentKey = ffjtTarOptionsIgnoreChownErrors
 					state = fflib.FFParse_want_colon
 					goto mainparse
 				}
@@ -837,6 +882,9 @@ mainparse:
 				case ffjtTarOptionsGIDMaps:
 					goto handle_GIDMaps
 
+				case ffjtTarOptionsIgnoreChownErrors:
+					goto handle_IgnoreChownErrors
+
 				case ffjtTarOptionsChownOpts:
 					goto handle_ChownOpts
 
@@ -860,6 +908,9 @@ mainparse:
 
 				case ffjtTarOptionsCopyPass:
 					goto handle_CopyPass
+
+				case ffjtTarOptionsForceMask:
+					goto handle_ForceMask
 
 				case ffjtTarOptionsnosuchkey:
 					err = fs.SkipField(tok)
@@ -1224,6 +1275,41 @@ handle_GIDMaps:
 	state = fflib.FFParse_after_value
 	goto mainparse
 
+handle_IgnoreChownErrors:
+
+	/* handler: j.IgnoreChownErrors type=bool kind=bool quoted=false*/
+
+	{
+		if tok != fflib.FFTok_bool && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for bool", tok))
+		}
+	}
+
+	{
+		if tok == fflib.FFTok_null {
+
+		} else {
+			tmpb := fs.Output.Bytes()
+
+			if bytes.Compare([]byte{'t', 'r', 'u', 'e'}, tmpb) == 0 {
+
+				j.IgnoreChownErrors = true
+
+			} else if bytes.Compare([]byte{'f', 'a', 'l', 's', 'e'}, tmpb) == 0 {
+
+				j.IgnoreChownErrors = false
+
+			} else {
+				err = errors.New("unexpected bytes for true/false value")
+				return fs.WrapErr(err)
+			}
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
 handle_ChownOpts:
 
 	/* handler: j.ChownOpts type=idtools.IDPair kind=struct quoted=false*/
@@ -1539,6 +1625,39 @@ handle_CopyPass:
 	state = fflib.FFParse_after_value
 	goto mainparse
 
+handle_ForceMask:
+
+	/* handler: j.ForceMask type=os.FileMode kind=uint32 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for FileMode", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+			j.ForceMask = nil
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 32)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			ttypval := os.FileMode(tval)
+			j.ForceMask = &ttypval
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
 wantedvalue:
 	return fs.WrapErr(fmt.Errorf("wanted value token, but got token: %v", tok))
 wrongtokenerror:
@@ -1826,7 +1945,7 @@ func (j *tarAppender) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 		buf.WriteString(`,"ChownOpts":null`)
 	}
 	buf.WriteString(`,"WhiteoutConverter":`)
-	/* Interface types must use runtime reflection. type=archive.tarWhiteoutConverter kind=interface */
+	/* Interface types must use runtime reflection. type=archive.TarWhiteoutConverter kind=interface */
 	err = buf.Encode(j.WhiteoutConverter)
 	if err != nil {
 		return err
@@ -2274,10 +2393,10 @@ handle_ChownOpts:
 
 handle_WhiteoutConverter:
 
-	/* handler: j.WhiteoutConverter type=archive.tarWhiteoutConverter kind=interface quoted=false*/
+	/* handler: j.WhiteoutConverter type=archive.TarWhiteoutConverter kind=interface quoted=false*/
 
 	{
-		/* Falling back. type=archive.tarWhiteoutConverter kind=interface */
+		/* Falling back. type=archive.TarWhiteoutConverter kind=interface */
 		tbuf, err := fs.CaptureField(tok)
 		if err != nil {
 			return fs.WrapErr(err)

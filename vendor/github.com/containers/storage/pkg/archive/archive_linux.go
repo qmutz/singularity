@@ -7,11 +7,12 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/containers/storage/pkg/idtools"
 	"github.com/containers/storage/pkg/system"
 	"golang.org/x/sys/unix"
 )
 
-func getWhiteoutConverter(format WhiteoutFormat, data interface{}) tarWhiteoutConverter {
+func GetWhiteoutConverter(format WhiteoutFormat, data interface{}) TarWhiteoutConverter {
 	if format == OverlayWhiteoutFormat {
 		if rolayers, ok := data.([]string); ok && len(rolayers) > 0 {
 			return overlayWhiteoutConverter{rolayers: rolayers}
@@ -60,10 +61,7 @@ func (o overlayWhiteoutConverter) ConvertWrite(hdr *tar.Header, path string, fi 
 				}
 				if statErr == nil {
 					if stat.Mode()&os.ModeCharDevice != 0 {
-						// It's a whiteout for this directory, so it can't have been
-						// both deleted and recreated in the layer we're diffing.
-						s := stat.Sys().(*syscall.Stat_t)
-						if major(s.Rdev) == 0 && minor(s.Rdev) == 0 {
+						if isWhiteOut(stat) {
 							return nil, nil
 						}
 					}
@@ -97,8 +95,7 @@ func (o overlayWhiteoutConverter) ConvertWrite(hdr *tar.Header, path string, fi 
 							// If it's whiteout for a parent directory, then the
 							// original directory wasn't inherited into this layer,
 							// so we don't need to emit whiteout for it.
-							s := stat.Sys().(*syscall.Stat_t)
-							if major(s.Rdev) == 0 && minor(s.Rdev) == 0 {
+							if isWhiteOut(stat) {
 								return nil, nil
 							}
 						}
@@ -111,13 +108,13 @@ func (o overlayWhiteoutConverter) ConvertWrite(hdr *tar.Header, path string, fi 
 	return
 }
 
-func (overlayWhiteoutConverter) ConvertRead(hdr *tar.Header, path string) (bool, error) {
+func (overlayWhiteoutConverter) ConvertReadWithHandler(hdr *tar.Header, path string, handler TarWhiteoutHandler) (bool, error) {
 	base := filepath.Base(path)
 	dir := filepath.Dir(path)
 
 	// if a directory is marked as opaque by the AUFS special file, we need to translate that to overlay
 	if base == WhiteoutOpaqueDir {
-		err := unix.Setxattr(dir, "trusted.overlay.opaque", []byte{'y'}, 0)
+		err := handler.Setxattr(dir, "trusted.overlay.opaque", []byte{'y'})
 		// don't write the file itself
 		return false, err
 	}
@@ -127,10 +124,10 @@ func (overlayWhiteoutConverter) ConvertRead(hdr *tar.Header, path string) (bool,
 		originalBase := base[len(WhiteoutPrefix):]
 		originalPath := filepath.Join(dir, originalBase)
 
-		if err := unix.Mknod(originalPath, unix.S_IFCHR, 0); err != nil {
+		if err := handler.Mknod(originalPath, unix.S_IFCHR, 0); err != nil {
 			return false, err
 		}
-		if err := os.Chown(originalPath, hdr.Uid, hdr.Gid); err != nil {
+		if err := handler.Chown(originalPath, hdr.Uid, hdr.Gid); err != nil {
 			return false, err
 		}
 
@@ -139,4 +136,41 @@ func (overlayWhiteoutConverter) ConvertRead(hdr *tar.Header, path string) (bool,
 	}
 
 	return true, nil
+}
+
+type directHandler struct {
+}
+
+func (d directHandler) Setxattr(path, name string, value []byte) error {
+	return unix.Setxattr(path, name, value, 0)
+}
+
+func (d directHandler) Mknod(path string, mode uint32, dev int) error {
+	return unix.Mknod(path, mode, dev)
+}
+
+func (d directHandler) Chown(path string, uid, gid int) error {
+	return idtools.SafeChown(path, uid, gid)
+}
+
+func (o overlayWhiteoutConverter) ConvertRead(hdr *tar.Header, path string) (bool, error) {
+	var handler directHandler
+	return o.ConvertReadWithHandler(hdr, path, handler)
+}
+
+func isWhiteOut(stat os.FileInfo) bool {
+	s := stat.Sys().(*syscall.Stat_t)
+	return major(uint64(s.Rdev)) == 0 && minor(uint64(s.Rdev)) == 0
+}
+
+func GetFileOwner(path string) (uint32, uint32, uint32, error) {
+	f, err := os.Stat(path)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	s, ok := f.Sys().(*syscall.Stat_t)
+	if ok {
+		return s.Uid, s.Gid, s.Mode & 07777, nil
+	}
+	return 0, 0, uint32(f.Mode()), nil
 }

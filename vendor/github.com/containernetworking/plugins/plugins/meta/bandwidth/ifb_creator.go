@@ -50,7 +50,7 @@ func TeardownIfb(deviceName string) error {
 	return err
 }
 
-func CreateIngressQdisc(rateInBits, burstInBits int, hostDeviceName string) error {
+func CreateIngressQdisc(rateInBits, burstInBits uint64, hostDeviceName string) error {
 	hostDevice, err := netlink.LinkByName(hostDeviceName)
 	if err != nil {
 		return fmt.Errorf("get host device: %s", err)
@@ -58,7 +58,7 @@ func CreateIngressQdisc(rateInBits, burstInBits int, hostDeviceName string) erro
 	return createTBF(rateInBits, burstInBits, hostDevice.Attrs().Index)
 }
 
-func CreateEgressQdisc(rateInBits, burstInBits int, hostDeviceName string, ifbDeviceName string) error {
+func CreateEgressQdisc(rateInBits, burstInBits uint64, hostDeviceName string, ifbDeviceName string) error {
 	ifbDevice, err := netlink.LinkByName(ifbDeviceName)
 	if err != nil {
 		return fmt.Errorf("get ifb device: %s", err)
@@ -113,7 +113,7 @@ func CreateEgressQdisc(rateInBits, burstInBits int, hostDeviceName string, ifbDe
 	return nil
 }
 
-func createTBF(rateInBits, burstInBits, linkIndex int) error {
+func createTBF(rateInBits, burstInBits uint64, linkIndex int) error {
 	// Equivalent to
 	// tc qdisc add dev link root tbf
 	//		rate netConf.BandwidthLimits.Rate
@@ -125,9 +125,10 @@ func createTBF(rateInBits, burstInBits, linkIndex int) error {
 		return fmt.Errorf("invalid burst: %d", burstInBits)
 	}
 	rateInBytes := rateInBits / 8
-	bufferInBytes := buffer(uint64(rateInBytes), uint32(burstInBits))
+	burstInBytes := burstInBits / 8
+	bufferInBytes := buffer(uint64(rateInBytes), uint32(burstInBytes))
 	latency := latencyInUsec(latencyInMillis)
-	limitInBytes := limit(uint64(rateInBytes), latency, uint32(bufferInBytes))
+	limitInBytes := limit(uint64(rateInBytes), latency, uint32(burstInBytes))
 
 	qdisc := &netlink.Tbf{
 		QdiscAttrs: netlink.QdiscAttrs{
@@ -159,7 +160,7 @@ func buffer(rate uint64, burst uint32) uint32 {
 }
 
 func limit(rate uint64, latency float64, buffer uint32) uint32 {
-	return uint32(float64(rate) / float64(netlink.TIME_UNITS_PER_SEC) * (latency + float64(tick2Time(buffer))))
+	return uint32(float64(rate)*latency/float64(netlink.TIME_UNITS_PER_SEC)) + buffer
 }
 
 func latencyInUsec(latencyInMillis float64) float64 {
