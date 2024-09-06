@@ -1,4 +1,4 @@
-FROM golang:1.10-alpine
+FROM golang:1.22.7-alpine
 
 ENV DISTRIBUTION_DIR /go/src/github.com/docker/distribution
 ENV DOCKER_BUILDTAGS include_oss include_gcs
